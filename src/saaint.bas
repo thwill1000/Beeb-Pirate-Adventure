@@ -10,7 +10,9 @@ Option Default Integer
 #Include "splib/system.inc"
 #Include "splib/array.inc"
 #Include "splib/list.inc"
+#Include "splib/map.inc"
 #Include "splib/string.inc"
+#Include "splib/txtwm.inc"
 #Include "splib/file.inc"
 #Include "advent.inc"
 #Include "console.inc"
@@ -59,6 +61,7 @@ Dim continue_flag = 0 ' Flag that, when set will cause the next action(s) to be
 Dim ip ' action parameter pointer
 
 Mode 2
+Cls
 main()
 Pause 2000
 ' Replaced the following line with END to make stand alone
@@ -66,7 +69,7 @@ Pause 2000
 End
 
 Sub main()
-  Local f$ = Choice(str.trim$(Mm.CmdLine$) = "", "adv01", Mm.CmdLine$)
+  Local f$ = Choice(str.trim$(Mm.CmdLine$) = "", choose_advent$(), Mm.CmdLine$)
   f$ = advent.find$(f$)
   advent.read(f$)
 
@@ -80,6 +83,128 @@ Sub main()
   con.endl()
   con.println("Goodbye!", 1)
   con.close_all()
+End Sub
+
+Function choose_advent$()
+  Local m$(map.new%(50)) Length 64
+  map.init(m$())
+  advent.get_all(m$())
+
+  Const MENU_WIDTH% = Int(con.WIDTH / 2) - 4
+  Const MENU_HEIGHT% = con.HEIGHT - 6
+
+  Option Console Serial
+
+  twm.init(3, 10075)
+  Local win0% = twm.new_win%(0, 0, con.WIDTH, con.HEIGHT)
+  Local left% = twm.new_win%(2, 4, MENU_WIDTH%, MENU_HEIGHT%)
+  Local right% = twm.new_win%(con.WIDTH / 2 + 1, 4, MENU_WIDTH% + 1, MENU_HEIGHT%)
+
+  twm.switch(win0%)
+  twm.box(0, 2, con.WIDTH, con.HEIGHT - 2)
+  twm.box(0, 2, con.WIDTH / 2, con.HEIGHT - 2)
+  twm.bold(1)
+  twm.print_at(0, 0, str.centre$("Select adventure using [Up], [Down], [Page Up], [Page Down] and [Enter]", con.WIDTH))
+
+  Local first% = 0, sel% = 0, requires_update% = 1
+  paint_menu(left%, m$(), first%, sel%)
+
+  Local size% = map.size%(m$())
+  Local new_sel% = sel%
+  Local k$ = Input$(255, #0)
+
+  Do
+    k$ = Inkey$
+    Select Case Asc(k$)
+      Case 128 ' Up
+        new_sel% = sel% - 1
+      Case 129 ' Down
+        new_sel% = sel% + 1
+      Case 136 ' Page Up
+        new_sel% = sel% - MENU_HEIGHT%
+      Case 137 ' Page Down
+        new_sel% = sel% + MENU_HEIGHT%
+      Case 0
+        If requires_update% Then
+          paint_description(right%, map.get$(m$(), m$(sel%)))
+          requires_update% = 0
+        EndIf
+    End Select
+
+    ' Clear the keyboard buffer without blocking when it is empty.
+    If k$ <> "" Then k$ = Input$(255, #0)
+
+    ' Keep new selected item within bounds of list.
+    new_sel% = Min(size% - 1, Max(0, new_sel%))
+
+    ' Short-circuit if new selected item = old selected item.
+    If new_sel% = sel% Then Continue Do
+
+    If Abs(sel% - new_sel%) = 1 Then
+      twm.switch(left%)
+      twm.inverse(0)
+      twm.print_at(0, sel% - first%, fmt_item$(m$(sel%), MENU_WIDTH%))
+      If new_sel% >= first% + MENU_HEIGHT% Then twm.scroll_up(1) : Inc first%, 1
+      If new_sel% < first% Then twm.scroll_down(1) : Inc first%, -1
+      twm.inverse(1)
+      twm.print_at(0, new_sel% - first%, fmt_item$(m$(new_sel%), MENU_WIDTH%))
+    Else
+      If (new_sel% < first%) Or (new_sel >= first% + MENU_HEIGHT%) Then first% = new_sel%
+      paint_menu(left%, m$(), first%, new_sel%)
+    EndIf
+
+    sel% = new_sel%
+    requires_update% = 1
+    Pause 100
+  Loop
+
+  twm.clear()
+
+End Function
+
+Sub paint_menu(win%, m$(), first%, sel%)
+  twm.switch(win%)
+  twm.inverse(0)
+  twm.cls()
+  Local i%
+  Local size% = map.size%(m$())
+  Local last% = first% + twm.h% - 1
+  If last% >= size% Then last% = size% - 1
+  For i% = first% To last%
+    twm.inverse(i% = sel%)
+    twm.print_at(0, i% - first%, fmt_item$(m$(i%), twm.w%))
+  Next
+End Sub
+
+Function fmt_item$(s$, w%)
+  fmt_item$ = str.centre$(Mid$(s$, 1, w%), w%)
+End Function
+
+Sub paint_description(win%, advent$)
+  Local desc%(200)
+  advent.read_description(fil.trim_extension$(advent.find$(advent$)) + ".ext", desc%())
+
+  twm.switch(win%)
+  twm.cls()
+  twm.print_at(0, 0)
+
+  Local ch%, i%, s$
+  For i% = 1 To LLen(desc%())
+    ch% = Peek(Var desc%(), i% + 7)
+    If ch% = 10 Then
+      twm.print(s$)
+      s$ = ""
+      Inc twm.y%
+      twm.x% = 0
+    ElseIf ch% = 13 Then
+      ' Do nothing.
+    Else
+      Cat s$, Chr$(ch%)
+      If Len(s$) = 255 Then twm.print(s$) : s$ = ""
+    EndIf
+  Next
+  twm.print(s$)
+
 End Sub
 
 Sub show_intro()
